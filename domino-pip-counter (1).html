@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Pip Count — Domino Counter</title>
+<style>
+  :root{
+    --felt: #1F3329;
+    --felt-deep: #142019;
+    --ivory: #EDE6D3;
+    --ivory-dim: #D9D0B8;
+    --ink: #211B14;
+    --brass: #B08D57;
+    --brass-dim: #8A6E45;
+    --cream: #F4EFE3;
+    --rust: #B4502F;
+  }
+
+  *{ box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--felt-deep);
+    overflow:hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--cream);
+  }
+
+  body{ display:flex; flex-direction:column; height:100dvh; }
+
+  .serif{ font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif; }
+
+  /* ---------- Stage ---------- */
+
+  #stageWrap{
+    position:relative; flex:1;
+    display:flex; align-items:center; justify-content:center;
+    background: radial-gradient(ellipse at 50% 30%, rgba(255,255,255,0.05), transparent 60%), var(--felt);
+    overflow:hidden;
+  }
+
+  #stage{ position:relative; max-width:100%; max-height:100%; }
+
+  #stage video, #stage canvas{
+    position:absolute; inset:0; width:100%; height:100%; display:block;
+  }
+  #stage video{ object-fit:cover; transform: scaleX(var(--mirror, 1)); }
+  #overlay{ pointer-events:none; }
+
+  /* ---------- Idle / loading / error screen ---------- */
+
+  #idleScreen{
+    position:absolute; inset:0;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:22px; text-align:center; padding:32px;
+    background: radial-gradient(ellipse at 50% 20%, rgba(237,230,211,0.06), transparent 55%), var(--felt);
+    z-index:8;
+  }
+  #idleScreen.hidden{ display:none; }
+
+  .tileMark{
+    width:64px; height:102px;
+    background: linear-gradient(160deg, var(--ivory) 0%, var(--ivory-dim) 100%);
+    border-radius:11px; border: 1px solid rgba(0,0,0,0.15);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.4);
+    position:relative;
+    animation: breathe 1.8s ease-in-out infinite;
+  }
+  @keyframes breathe{ 0%,100%{ opacity:0.55; } 50%{ opacity:1; } }
+  .tileMark::before{
+    content:""; position:absolute; left:10%; right:10%; top:50%; height:2px;
+    background: rgba(33,27,20,0.25); transform: translateY(-50%);
+  }
+  .tileDots{ position:absolute; left:0; right:0; height:50%; display:grid; grid-template-columns:1fr 1fr 1fr; align-items:center; justify-items:center; gap:2px; padding:9px; }
+  .tileDots.top{ top:0; } .tileDots.bottom{ bottom:0; }
+  .dot{ width:8px; height:8px; border-radius:50%; background: var(--ink); }
+  .dot.off{ background: transparent; }
+
+  #idleScreen h1{ margin:0; font-size:1.3rem; font-weight:600; max-width:22ch; }
+  #idleScreen p{ margin:0; color: var(--ivory-dim); font-size:0.92rem; max-width:32ch; line-height:1.5; }
+  #idleScreen p.err{ color: var(--rust); display:none; }
+  #idleScreen p.err.show{ display:block; }
+
+  .bigBtn{
+    appearance:none; border:none; cursor:pointer;
+    background: linear-gradient(180deg, var(--ivory) 0%, var(--ivory-dim) 100%);
+    color: var(--ink); font-family: inherit; font-weight:600; font-size:1rem;
+    padding:14px 30px; border-radius:999px; box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+    display:none;
+  }
+  .bigBtn.show{ display:inline-block; }
+  .bigBtn:active{ transform: translateY(1px); }
+
+  /* ---------- Result panel ---------- */
+
+  #resultPanel{
+    position:absolute; left:0; right:0; top:0; z-index:7;
+    display:flex; justify-content:center;
+    padding-top: calc(16px + env(safe-area-inset-top));
+    opacity:0; transform: translateY(-14px);
+    pointer-events:none;
+    transition: opacity 0.22s ease, transform 0.22s ease;
+  }
+  #resultPanel.show{ opacity:1; transform: translateY(0); pointer-events:auto; }
+
+  #resultCard{
+    background: linear-gradient(160deg, var(--ivory) 0%, var(--ivory-dim) 100%);
+    border-radius:18px; padding:14px 28px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.5);
+    border: 1px solid rgba(0,0,0,0.15);
+    text-align:center;
+  }
+  #resultTotal{ font-size:2.6rem; font-weight:700; color: var(--ink); line-height:1; }
+  #resultLabel{ font-size:0.68rem; text-transform:uppercase; letter-spacing:0.09em; color: var(--ink); opacity:0.6; margin-top:4px; }
+
+  /* ---------- Mask preview thumbnail ---------- */
+  #maskThumb{
+    position:absolute; bottom:14px; right:14px; z-index:6;
+    width:92px; border:2px solid var(--brass); border-radius:8px; overflow:hidden;
+    box-shadow:0 6px 14px rgba(0,0,0,0.5); display:none;
+  }
+  #maskThumb.show{ display:block; }
+  #maskThumb canvas{ display:block; width:100%; height:auto; }
+
+  /* ---------- Bottom control bar ---------- */
+
+  #controlBar{
+    position:relative; z-index:10;
+    background: var(--felt-deep);
+    border-top: 1px solid rgba(176,141,87,0.25);
+    padding: 16px 22px calc(16px + env(safe-area-inset-bottom));
+    display:flex; align-items:center; justify-content:space-between;
+  }
+
+  .roundBtn{
+    appearance:none; border:1px solid rgba(237,230,211,0.18);
+    background: rgba(237,230,211,0.06); color: var(--cream);
+    font-size:1.1rem; width:48px; height:48px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+  }
+  .roundBtn:active{ background: rgba(237,230,211,0.14); }
+  .roundBtn:disabled{ opacity:0.3; }
+
+  #shutterBtn{
+    width:72px; height:72px; border-radius:50%;
+    background: transparent; border:4px solid var(--ivory);
+    display:flex; align-items:center; justify-content:center; cursor:pointer;
+    padding:0;
+  }
+  #shutterBtn::after{
+    content:""; width:56px; height:56px; border-radius:50%;
+    background: var(--ivory);
+    transition: transform 0.1s ease, background 0.1s ease;
+  }
+  #shutterBtn:active::after{ transform: scale(0.85); }
+  #shutterBtn.retakeMode::after{ background: var(--brass); width:26px; height:26px; border-radius:6px; }
+  #shutterBtn:disabled{ opacity:0.3; }
+
+  .barLabel{
+    position:absolute; left:0; right:0; bottom: calc(100% + 6px);
+    text-align:center; font-size:0.7rem; color: var(--ivory-dim);
+    letter-spacing:0.03em;
+  }
+  .btnWrap{ position:relative; }
+
+  /* ---------- Settings panel ---------- */
+
+  #settingsPanel{
+    position:absolute; left:0; right:0; bottom:0; z-index:9;
+    background: var(--felt-deep); border-top: 1px solid rgba(176,141,87,0.3);
+    padding: 18px 20px calc(18px + env(safe-area-inset-bottom));
+    transform: translateY(100%); transition: transform 0.28s ease;
+    max-height:72vh; overflow-y:auto;
+  }
+  #settingsPanel.open{ transform: translateY(0); }
+
+  .settingRow{ margin-bottom:18px; }
+  .settingRow:last-child{ margin-bottom:0; }
+  .settingRow label{ display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; color: var(--ivory-dim); margin-bottom:8px; }
+  .settingRow label .val{ color: var(--cream); font-weight:600; }
+  input[type=range]{ width:100%; accent-color: var(--brass); }
+  .switchRow{ display:flex; justify-content:space-between; align-items:center; font-size:0.88rem; padding:6px 0; }
+  .switchRow input[type=checkbox]{ width:20px; height:20px; accent-color: var(--brass); }
+  #settingsPanel h2{ font-size:0.7rem; text-transform:uppercase; letter-spacing:0.09em; color: var(--brass); margin:0 0 14px 0; font-weight:600; }
+  .panelDivider{ height:1px; background: rgba(237,230,211,0.1); margin:16px 0; }
+</style>
+</head>
+<body>
+
+  <div id="stageWrap">
+    <div id="stage">
+      <video id="video" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+
+      <div id="resultPanel">
+        <div id="resultCard">
+          <div id="resultTotal">0</div>
+          <div id="resultLabel">total pips</div>
+        </div>
+      </div>
+
+      <div id="maskThumb"><canvas id="maskCanvas"></canvas></div>
+    </div>
+
+    <div id="idleScreen">
+      <div class="tileMark">
+        <div class="tileDots top"><span class="dot"></span><span class="dot off"></span><span class="dot"></span></div>
+        <div class="tileDots bottom"><span class="dot off"></span><span class="dot"></span><span class="dot off"></span></div>
+      </div>
+      <h1 class="serif" id="idleTitle">Opening camera…</h1>
+      <p id="idleSub">Point it at a row of dominoes once the viewfinder appears.</p>
+      <p class="err" id="permHint">Camera access was blocked. Allow camera permission for this page in your browser's settings, then try again.</p>
+      <button class="bigBtn" id="startBtn">Try again</button>
+    </div>
+  </div>
+
+  <div id="settingsPanel">
+    <h2>Detection settings</h2>
+
+    <div class="settingRow">
+      <label>Pip size <span class="val" id="sizeVal">medium</span></label>
+      <input type="range" id="sizeSlider" min="1" max="9" value="5" step="1">
+    </div>
+
+    <div class="switchRow">
+      <span>Auto threshold</span>
+      <input type="checkbox" id="autoThreshold" checked>
+    </div>
+
+    <div class="settingRow" id="manualThresholdRow" style="display:none;">
+      <label>Threshold <span class="val" id="threshVal">128</span></label>
+      <input type="range" id="threshSlider" min="10" max="245" value="128" step="1">
+    </div>
+
+    <div class="switchRow">
+      <span>Light pips on dark tiles</span>
+      <input type="checkbox" id="invertToggle">
+    </div>
+
+    <div class="panelDivider"></div>
+
+    <div class="switchRow">
+      <span>Show detection mask</span>
+      <input type="checkbox" id="maskToggle">
+    </div>
+  </div>
+
+  <div id="controlBar">
+    <button class="roundBtn" id="flipBtn" title="Switch camera">⟲</button>
+
+    <div class="btnWrap">
+      <div class="barLabel" id="shutterLabel">Snap</div>
+      <button id="shutterBtn" title="Snap photo" disabled></button>
+    </div>
+
+    <button class="roundBtn" id="settingsBtn" title="Settings">⚙</button>
+  </div>
+
+<script>
+(function(){
+  "use strict";
+
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const overlayCtx = overlay.getContext('2d');
+  const stage = document.getElementById('stage');
+
+  const idleScreen = document.getElementById('idleScreen');
+  const idleTitle = document.getElementById('idleTitle');
+  const idleSub = document.getElementById('idleSub');
+  const permHint = document.getElementById('permHint');
+  const startBtn = document.getElementById('startBtn');
+
+  const resultPanel = document.getElementById('resultPanel');
+  const resultTotal = document.getElementById('resultTotal');
+
+  const shutterBtn = document.getElementById('shutterBtn');
+  const shutterLabel = document.getElementById('shutterLabel');
+  const flipBtn = document.getElementById('flipBtn');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const settingsPanel = document.getElementById('settingsPanel');
+
+  const autoThreshold = document.getElementById('autoThreshold');
+  const manualThresholdRow = document.getElementById('manualThresholdRow');
+  const threshSlider = document.getElementById('threshSlider');
+  const threshVal = document.getElementById('threshVal');
+  const invertToggle = document.getElementById('invertToggle');
+  const sizeSlider = document.getElementById('sizeSlider');
+  const sizeVal = document.getElementById('sizeVal');
+  const maskToggle = document.getElementById('maskToggle');
+  const maskThumb = document.getElementById('maskThumb');
+  const maskCanvas = document.getElementById('maskCanvas');
+  const maskCtx = maskCanvas.getContext('2d');
+
+  const PROC_MAX_W = 640; // processing / overlay resolution cap
+  let procW = 0, procH = 0;
+  const procCanvas = document.createElement('canvas');
+  const procCtx = procCanvas.getContext('2d', { willReadFrequently:true });
+
+  let stream = null;
+  let facingMode = 'environment';
+  let loopTimer = null;
+  let mode = 'loading'; // loading | live | result
+  let lastGray = null;
+
+  const sizeLabels = ['tiny','tiny','small','small','medium','medium','large','large','huge'];
+
+  // ---------- camera lifecycle ----------
+
+  async function startCamera(){
+    setIdle('Opening camera…', 'Point it at a row of dominoes once the viewfinder appears.', false);
+    startBtn.classList.remove('show');
+    try{
+      if(stream){ stream.getTracks().forEach(t=>t.stop()); }
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: facingMode }, width:{ideal:1280}, height:{ideal:720} },
+        audio:false
+      });
+      video.srcObject = stream;
+      await video.play();
+      video.style.setProperty('--mirror', facingMode === 'user' ? -1 : 1);
+      onVideoReady();
+    }catch(err){
+      setIdle('Camera unavailable', null, true);
+      startBtn.classList.add('show');
+      console.error(err);
+    }
+  }
+
+  function onVideoReady(){
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if(!vw || !vh){ setTimeout(onVideoReady, 100); return; }
+
+    stage.style.aspectRatio = (vw/vh).toString();
+
+    const scale = Math.min(1, PROC_MAX_W / vw);
+    procW = Math.max(1, Math.round(vw * scale));
+    procH = Math.max(1, Math.round(vh * scale));
+
+    procCanvas.width = procW; procCanvas.height = procH;
+    overlay.width = procW; overlay.height = procH;
+    maskCanvas.width = procW; maskCanvas.height = procH;
+
+    enterLive();
+  }
+
+  async function flipCamera(){
+    facingMode = facingMode === 'environment' ? 'user' : 'environment';
+    await startCamera();
+  }
+
+  // ---------- modes ----------
+
+  function setIdle(title, sub, isError){
+    idleScreen.classList.remove('hidden');
+    idleTitle.textContent = title;
+    if(sub !== null) idleSub.style.display = 'block'; else idleSub.style.display = 'none';
+    if(sub) idleSub.textContent = sub;
+    permHint.classList.toggle('show', !!isError);
+    shutterBtn.disabled = true;
+    flipBtn.disabled = true;
+  }
+
+  function enterLive(){
+    mode = 'live';
+    idleScreen.classList.add('hidden');
+    resultPanel.classList.remove('show');
+    shutterBtn.disabled = false;
+    shutterBtn.classList.remove('retakeMode');
+    shutterLabel.textContent = 'Snap';
+    flipBtn.disabled = false;
+    video.play();
+    runLoop();
+  }
+
+  function enterResult(pipCount){
+    mode = 'result';
+    stopLoop();
+    video.pause();
+    shutterBtn.classList.add('retakeMode');
+    shutterLabel.textContent = 'Retake';
+    resultTotal.textContent = pipCount;
+    resultPanel.classList.add('show');
+  }
+
+  // ---------- detection loop (runs continuously while live, highlighting pips) ----------
+
+  function runLoop(){
+    if(mode !== 'live') return;
+    processFrame(false);
+    loopTimer = setTimeout(runLoop, 90); // ~11fps
+  }
+
+  function stopLoop(){
+    if(loopTimer){ clearTimeout(loopTimer); loopTimer = null; }
+  }
+
+  function grabGray(){
+    procCtx.drawImage(video, 0, 0, procW, procH);
+    const imgData = procCtx.getImageData(0, 0, procW, procH);
+    return toGrayscale(imgData);
+  }
+
+  function processFrame(){
+    const gray = grabGray();
+    return runDetection(gray);
+  }
+
+  function reprocessCurrent(){
+    if(!lastGray) return 0;
+    return runDetection(lastGray);
+  }
+
+  function runDetection(gray){
+    lastGray = gray;
+
+    const invert = invertToggle.checked;
+    const threshold = autoThreshold.checked ? otsuThreshold(gray) : parseInt(threshSlider.value, 10);
+
+    if(maskToggle.checked){
+      drawMask(gray, threshold, invert);
+      maskThumb.classList.add('show');
+    } else {
+      maskThumb.classList.remove('show');
+    }
+
+    const comps = labelComponents(gray, procW, procH, threshold, invert);
+    const sizeFactor = sizeFactorFromSlider(parseInt(sizeSlider.value, 10));
+    const pips = filterPips(comps, procW * procH, sizeFactor);
+
+    drawOverlay(pips);
+    return pips.length;
+  }
+
+  // ---------- image processing ----------
+
+  function toGrayscale(imageData){
+    const { data, width, height } = imageData;
+    const gray = new Float32Array(width * height);
+    for(let i = 0, j = 0; i < data.length; i += 4, j++){
+      gray[j] = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+    }
+    return gray;
+  }
+
+  function otsuThreshold(gray){
+    const hist = new Array(256).fill(0);
+    for(let i = 0; i < gray.length; i++) hist[gray[i] | 0]++;
+    const total = gray.length;
+    let sum = 0;
+    for(let t = 0; t < 256; t++) sum += t * hist[t];
+    let sumB = 0, wB = 0, varMax = -1, threshold = 128;
+    for(let t = 0; t < 256; t++){
+      wB += hist[t];
+      if(wB === 0) continue;
+      const wF = total - wB;
+      if(wF === 0) break;
+      sumB += t * hist[t];
+      const mB = sumB / wB, mF = (sum - sumB) / wF;
+      const between = wB * wF * (mB - mF) * (mB - mF);
+      if(between > varMax){ varMax = between; threshold = t; }
+    }
+    return threshold;
+  }
+
+  function labelComponents(gray, width, height, threshold, invert){
+    const visited = new Uint8Array(width * height);
+    const isFg = invert
+      ? (idx) => gray[idx] > threshold
+      : (idx) => gray[idx] < threshold;
+
+    const components = [];
+    const stack = new Int32Array(width * height);
+
+    for(let y = 0; y < height; y++){
+      for(let x = 0; x < width; x++){
+        const start = y * width + x;
+        if(visited[start] || !isFg(start)) continue;
+
+        let sp = 0;
+        stack[sp++] = start;
+        visited[start] = 1;
+
+        let minX = x, maxX = x, minY = y, maxY = y, area = 0;
+
+        while(sp > 0){
+          const cur = stack[--sp];
+          const cx = cur % width, cy = (cur / width) | 0;
+          area++;
+          if(cx < minX) minX = cx; if(cx > maxX) maxX = cx;
+          if(cy < minY) minY = cy; if(cy > maxY) maxY = cy;
+
+          if(cx > 0){ const n = cur - 1; if(!visited[n] && isFg(n)){ visited[n]=1; stack[sp++]=n; } }
+          if(cx < width-1){ const n = cur + 1; if(!visited[n] && isFg(n)){ visited[n]=1; stack[sp++]=n; } }
+          if(cy > 0){ const n = cur - width; if(!visited[n] && isFg(n)){ visited[n]=1; stack[sp++]=n; } }
+          if(cy < height-1){ const n = cur + width; if(!visited[n] && isFg(n)){ visited[n]=1; stack[sp++]=n; } }
+        }
+
+        components.push({
+          minX, maxX, minY, maxY, area,
+          cx: (minX + maxX) / 2,
+          cy: (minY + maxY) / 2
+        });
+      }
+    }
+    return components;
+  }
+
+  function sizeFactorFromSlider(v){
+    const table = [0.00025, 0.0004, 0.0007, 0.0011, 0.0017, 0.0026, 0.004, 0.006, 0.009];
+    return table[v-1] ?? 0.0017;
+  }
+
+  function filterPips(components, frameArea, sizeFactor){
+    const expected = frameArea * sizeFactor;
+    const minArea = expected * 0.28;
+    const maxArea = expected * 4.5;
+
+    return components.filter(c => {
+      if(c.area < minArea || c.area > maxArea) return false;
+      const w = c.maxX - c.minX + 1, h = c.maxY - c.minY + 1;
+      const bboxArea = w * h;
+      const extent = c.area / bboxArea;
+      const aspect = w / h;
+      if(extent < 0.55) return false;
+      if(aspect < 0.55 || aspect > 1.8) return false;
+      return true;
+    });
+  }
+
+  // ---------- drawing ----------
+
+  function drawOverlay(pips){
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+    overlayCtx.lineWidth = Math.max(1.5, overlay.width * 0.006);
+    overlayCtx.strokeStyle = '#FF6B4A';
+    overlayCtx.fillStyle = 'rgba(255,107,74,0.16)';
+
+    for(const p of pips){
+      const w = p.maxX - p.minX + 1, h = p.maxY - p.minY + 1;
+      const r = Math.max(w, h) / 2 * 1.15;
+      overlayCtx.beginPath();
+      overlayCtx.arc(p.cx, p.cy, r, 0, Math.PI * 2);
+      overlayCtx.fill();
+      overlayCtx.stroke();
+    }
+  }
+
+  function drawMask(gray, threshold, invert){
+    const imgData = maskCtx.createImageData(procW, procH);
+    for(let i = 0; i < gray.length; i++){
+      const fg = invert ? gray[i] > threshold : gray[i] < threshold;
+      const v = fg ? 255 : 0;
+      const o = i * 4;
+      imgData.data[o] = v; imgData.data[o+1] = v; imgData.data[o+2] = v; imgData.data[o+3] = 255;
+    }
+    maskCtx.putImageData(imgData, 0, 0);
+  }
+
+  // ---------- shutter ----------
+
+  function onShutter(){
+    if(mode === 'live'){
+      const count = processFrame(); // final, freshest read at the moment of the tap
+      enterResult(count);
+    } else if(mode === 'result'){
+      enterLive();
+    }
+  }
+
+  // ---------- settings panel wiring ----------
+
+  function openCloseSettings(){
+    settingsPanel.classList.toggle('open');
+  }
+
+  function maybeReprocess(){
+    if(mode === 'result'){
+      const count = reprocessCurrent();
+      resultTotal.textContent = count;
+    }
+  }
+
+  autoThreshold.addEventListener('change', () => {
+    manualThresholdRow.style.display = autoThreshold.checked ? 'none' : 'block';
+    maybeReprocess();
+  });
+  threshSlider.addEventListener('input', () => { threshVal.textContent = threshSlider.value; maybeReprocess(); });
+  invertToggle.addEventListener('change', maybeReprocess);
+  sizeSlider.addEventListener('input', () => {
+    sizeVal.textContent = sizeLabels[parseInt(sizeSlider.value,10)-1];
+    maybeReprocess();
+  });
+  maskToggle.addEventListener('change', () => {
+    if(!maskToggle.checked) maskThumb.classList.remove('show');
+    maybeReprocess();
+  });
+
+  // ---------- buttons ----------
+
+  startBtn.addEventListener('click', startCamera);
+  shutterBtn.addEventListener('click', onShutter);
+  flipBtn.addEventListener('click', flipCamera);
+  settingsBtn.addEventListener('click', openCloseSettings);
+
+  sizeVal.textContent = sizeLabels[parseInt(sizeSlider.value,10)-1];
+
+  // auto-open camera as soon as the app loads
+  startCamera();
+
+})();
+</script>
+</body>
+</html>
